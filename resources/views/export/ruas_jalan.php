@@ -121,7 +121,8 @@
             'summary'           => $summary,
             'ruas'              => $ruas,
             'perkerasans'       => $perkerasans ?? [],
-            'summaryPerkerasan' => $summaryPerkerasan ?? []
+            'summaryPerkerasan' => $summaryPerkerasan ?? [],
+            'fotoLapangans'     => $fotoLapangans ?? []
         ]); ?>
     </div>
     <?php else: ?>
@@ -335,3 +336,6 @@ function exportDocument(type) {
     }, 300);
 }
 </script>
+
+<?php require __DIR__ . '/../stripmap/_modal_foto.php'; ?>
+

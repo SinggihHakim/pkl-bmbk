@@ -49,12 +49,28 @@ $router->get('perkerasan/edit/{id}',      'StripmapController', 'perkerasanEdit'
 $router->post('perkerasan/update/{id}',   'StripmapController', 'perkerasanUpdate');
 $router->post('perkerasan/delete/{id}',    'StripmapController', 'perkerasanDelete');
 
+// ──────────────────────────────────────────────
+// Foto Lapangan Real STA
+// ──────────────────────────────────────────────
+$router->post('foto-lapangan/upload/{id}', 'StripmapController', 'uploadFoto');
+$router->post('foto-lapangan/delete/{id}', 'StripmapController', 'deleteFoto');
+
+// ──────────────────────────────────────────────
+// CRUD Segmentasi Penanganan Jalan
+// ──────────────────────────────────────────────
+$router->post('penanganan/store/{id}',         'PenangananController', 'store');
+$router->post('penanganan/update/{id}',        'PenangananController', 'update');
+$router->post('penanganan/delete/{id}',        'PenangananController', 'delete');
+$router->post('penanganan/apply-kondisi/{id}', 'PenangananController', 'applyKondisi');
+
 
 // ──────────────────────────────────────────────
 // Rekapitulasi Eksekutif
 // ──────────────────────────────────────────────
 $router->get('rekap/kemantapan', 'RekapController', 'kemantapan');
 $router->get('rekap/perkerasan', 'RekapController', 'perkerasan');
+$router->get('rekap/prediksi',   'PrediksiController', 'index');
+$router->get('rekap/prediksi/{id}', 'PrediksiController', 'detail');
 
 // ──────────────────────────────────────────────
 // Pusat Export & Cetak

@@ -12,12 +12,16 @@ class StripmapController
     private StripmapService   $service;
     private RuasService       $ruasService;
     private PerkerasanService $perkerasanService;
+    private FotoLapanganService $fotoService;
+    private PenangananService $penangananService;
 
     public function __construct()
     {
         $this->service           = new StripmapService();
         $this->ruasService       = new RuasService();
         $this->perkerasanService = new PerkerasanService();
+        $this->fotoService       = new FotoLapanganService();
+        $this->penangananService = new PenangananService();
     }
 
     /**
@@ -39,6 +43,10 @@ class StripmapController
             'summary'           => $this->service->getSummary($ruasId),
             'perkerasans'       => $this->perkerasanService->getByRuasId($ruasId),
             'summaryPerkerasan' => $this->perkerasanService->getSummary($ruasId),
+            'fotoLapangans'     => $this->fotoService->getByRuasId($ruasId),
+            'penanganans'       => $this->penangananService->getByRuasId($ruasId),
+            'penangananSummary' => $this->penangananService->getSummary($ruasId),
+            'penangananYears'   => $this->penangananService->getAvailableYears($ruasId),
         ];
         view('layouts.app', array_merge($data, ['content' => 'stripmap.index']));
     }
@@ -272,8 +280,55 @@ class StripmapController
             'summary'           => $this->service->getSummary($ruasId),
             'perkerasans'       => $this->perkerasanService->getByRuasId($ruasId),
             'summaryPerkerasan' => $this->perkerasanService->getSummary($ruasId),
+            'fotoLapangans'     => $this->fotoService->getByRuasId($ruasId),
         ];
         view('layouts.app', array_merge($data, ['content' => 'export.ruas_jalan']));
+    }
+
+    // ──────────────────────────────────────────────
+    // FOTO LAPANGAN HANDLERS
+    // ──────────────────────────────────────────────
+
+    /**
+     * Upload foto lapangan (bulk file atau file ZIP)
+     */
+    public function uploadFoto(int $ruasId): void
+    {
+        $ruas = $this->ruasService->findById($ruasId);
+        if (!$ruas) {
+            flash('error', 'Ruas jalan tidak ditemukan.');
+            redirect(base_url('ruas'));
+            return;
+        }
+
+        if (!empty($_FILES['zip_file']['name'])) {
+            $result = $this->fotoService->handleZipUpload($ruasId, $_FILES['zip_file']);
+        } elseif (!empty($_FILES['foto_files']['name'])) {
+            $result = $this->fotoService->handleBatchUpload($ruasId, $_FILES['foto_files']);
+        } else {
+            $result = ['success' => false, 'message' => 'Tidak ada file foto yang dipilih.'];
+        }
+
+        flash($result['success'] ? 'success' : 'error', $result['message']);
+        redirect(base_url('stripmap/' . $ruasId));
+    }
+
+    /**
+     * Hapus foto lapangan
+     */
+    public function deleteFoto(int $fotoId): void
+    {
+        $foto = (new FotoLapangan())->findById($fotoId);
+        $ruasId = $foto['ruas_id'] ?? null;
+
+        $result = $this->fotoService->deleteFoto($fotoId);
+        flash($result['success'] ? 'success' : 'error', $result['message']);
+
+        if ($ruasId) {
+            redirect(base_url('stripmap/' . $ruasId));
+        } else {
+            redirect(base_url('ruas'));
+        }
     }
 
     // ──────────────────────────────────────────────

@@ -60,11 +60,41 @@
     $pctAgregatTanah = $totalPanjangPerkerasan > 0 ? ($totalAgregatTanah / $totalPanjangPerkerasan) * 100 : 0;
     $pctBelumTembus  = $totalPanjangPerkerasan > 0 ? ($totalBelumTembus / $totalPanjangPerkerasan) * 100 : 0;
 
+    // Data Penanganan Jalan
+    $penanganans            = $penanganans ?? [];
+    $penangananSummary      = $penangananSummary ?? [];
+    $penangananYears        = $penangananYears ?? [];
+    $totalPanjangPenanganan = (float)($penangananSummary['total_panjang'] ?? 0);
+    $totalRencana           = (float)($penangananSummary['total_rencana'] ?? 0);
+    $totalProses            = (float)($penangananSummary['total_proses'] ?? 0);
+    $totalSelesai           = (float)($penangananSummary['total_selesai'] ?? 0);
+    $totalAnggaran          = (float)($penangananSummary['total_anggaran'] ?? 0);
+
+    if ($totalPanjangPenanganan <= 0 && !empty($penanganans)) {
+        foreach ($penanganans as $pn) {
+            $pLen = (float)($pn['panjang'] ?? 0);
+            $totalPanjangPenanganan += $pLen;
+            $st = $pn['status'] ?? 'rencana';
+            if ($st === 'rencana') $totalRencana += $pLen;
+            elseif ($st === 'proses') $totalProses += $pLen;
+            elseif ($st === 'selesai') $totalSelesai += $pLen;
+            $totalAnggaran += (float)($pn['anggaran'] ?? 0);
+        }
+    }
+
+    $pctRencana = $totalPanjangPenanganan > 0 ? ($totalRencana / $totalPanjangPenanganan) * 100 : 0;
+    $pctProses  = $totalPanjangPenanganan > 0 ? ($totalProses / $totalPanjangPenanganan) * 100 : 0;
+    $pctSelesai = $totalPanjangPenanganan > 0 ? ($totalSelesai / $totalPanjangPenanganan) * 100 : 0;
+
     // -----------------------------------------------------------------
     // LOGIKA SLICING CHUNKS MAKSIMAL 5KM (5000 METER)
     // -----------------------------------------------------------------
     $staBase = (float)($ruas['sta_awal'] ?? 0);
     $staEnd  = (float)($ruas['sta_akhir'] ?? 0);
+    // Pastikan staEnd mencakup rentang ruas penuh (panjang ruas)
+    if ((float)($ruas['panjang'] ?? 0) > 0) {
+        $staEnd = max($staEnd, $staBase + (float)$ruas['panjang']);
+    }
     foreach ($stripmaps as $sm) {
         if ((float)$sm['sta_akhir'] > $staEnd) {
             $staEnd = (float)$sm['sta_akhir'];
@@ -75,8 +105,19 @@
             $staEnd = (float)$pk['sta_akhir'];
         }
     }
+    foreach ($penanganans as $pn) {
+        if ((float)$pn['sta_akhir'] > $staEnd) {
+            $staEnd = (float)$pn['sta_akhir'];
+        }
+    }
+    // Juga perhitungkan STA foto lapangan agar foto di luar rentang stripmap tetap tampil
+    foreach (($fotoLapangans ?? []) as $fl) {
+        if ((float)$fl['sta_meter'] > $staEnd) {
+            $staEnd = (float)$fl['sta_meter'];
+        }
+    }
     if ($staEnd <= $staBase) {
-        $staEnd = $staBase + max($totalPanjang, $totalPanjangPerkerasan, (float)($ruas['panjang'] ?? 0), 1000.0);
+        $staEnd = $staBase + max($totalPanjang, $totalPanjangPerkerasan, $totalPanjangPenanganan, (float)($ruas['panjang'] ?? 0), 1000.0);
     }
     
     // 1. Ekstrak data stripmap (Kondisi)
@@ -131,7 +172,26 @@
         }
     }
 
-    // 3. Bagi range total ruas menjadi beberapa chunk berukuran max 5km (5000 meter)
+    // 3. Ekstrak data penanganan (Segmentasi Penanganan Jalan)
+    $pnRuns = [];
+    foreach ($penanganans as $pn) {
+        $pnRuns[] = [
+            'id'               => (int) $pn['id'],
+            'tahun'            => (int) $pn['tahun'],
+            'sta_awal'         => (float) $pn['sta_awal'],
+            'sta_akhir'        => (float) $pn['sta_akhir'],
+            'panjang'          => (float) $pn['panjang'],
+            'jenis_penanganan' => $pn['jenis_penanganan'],
+            'status'           => $pn['status'],
+            'nama_paket'       => $pn['nama_paket'] ?? '',
+            'anggaran'         => (float) ($pn['anggaran'] ?? 0),
+            'sumber_dana'      => $pn['sumber_dana'] ?? '',
+            'warna'            => !empty($pn['warna']) ? $pn['warna'] : (PenangananService::STATUS_COLORS[$pn['status']] ?? '#6366f1'),
+            'status_label'     => PenangananService::STATUS_LABELS[$pn['status']] ?? ucfirst($pn['status']),
+        ];
+    }
+
+    // 4. Bagi range total ruas menjadi beberapa chunk berukuran max 5km (5000 meter)
     $chunkSize = 5000.0;
     $chunks = [];
     $current = $staBase;
@@ -228,12 +288,54 @@
                 'is_gap'    => true
             ];
         }
+
+        // C. Distribusikan Penanganan Runs ke chunk ini
+        $overlappingPnRuns = [];
+        foreach ($pnRuns as $run) {
+            $overlapStart = max($run['sta_awal'], $current);
+            $overlapEnd   = min($run['sta_akhir'], $chunkEnd);
+            if ($overlapStart < $overlapEnd) {
+                $overlapLen = $overlapEnd - $overlapStart;
+                $overlappingPnRuns[] = array_merge($run, [
+                    'sta_awal'  => $overlapStart,
+                    'sta_akhir' => $overlapEnd,
+                    'panjang'   => $overlapLen,
+                ]);
+            }
+        }
+        usort($overlappingPnRuns, fn($a, $b) => $a['sta_awal'] <=> $b['sta_awal']);
+
+        $chunkPenanganans = [];
+        $currentPos = $current;
+        foreach ($overlappingPnRuns as $run) {
+            if ($run['sta_awal'] > $currentPos) {
+                $gapLen = $run['sta_awal'] - $currentPos;
+                $chunkPenanganans[] = [
+                    'sta_awal'  => $currentPos,
+                    'sta_akhir' => $run['sta_awal'],
+                    'panjang'   => $gapLen,
+                    'is_gap'    => true
+                ];
+            }
+            $chunkPenanganans[] = $run;
+            $currentPos = $run['sta_akhir'];
+        }
+        if ($currentPos < $chunkEnd) {
+            $gapLen = $chunkEnd - $currentPos;
+            $chunkPenanganans[] = [
+                'sta_awal'  => $currentPos,
+                'sta_akhir' => $chunkEnd,
+                'panjang'   => $gapLen,
+                'is_gap'    => true
+            ];
+        }
         
         $chunks[] = [
             'start'       => $current,
             'end'         => $chunkEnd,
             'stripmaps'   => $chunkStripmaps,
-            'perkerasans' => $chunkPerkerasans
+            'perkerasans' => $chunkPerkerasans,
+            'penanganans' => $chunkPenanganans,
         ];
         
         $current = $chunkEnd;
@@ -256,12 +358,20 @@
             } catch(e) {}
             return true;
         })(),
+        showPenanganan: (function() {
+            try {
+                let saved = localStorage.getItem('show_penanganan_line');
+                if (saved !== null) return saved === '1';
+            } catch(e) {}
+            return true;
+        })(),
+        penangananYearFilter: 'all',
         tickInterval: (function() {
             try {
                 let saved = localStorage.getItem('sta_tick_interval');
                 if (saved) return parseInt(saved);
             } catch (e) {}
-            return <?= max($totalPanjang, $totalPanjangPerkerasan) < 1500 ? 100 : (max($totalPanjang, $totalPanjangPerkerasan) < 4000 ? 250 : (max($totalPanjang, $totalPanjangPerkerasan) < 10000 ? 500 : 1000)) ?>;
+            return <?= max($totalPanjang, $totalPanjangPerkerasan, $totalPanjangPenanganan) < 1500 ? 100 : (max($totalPanjang, $totalPanjangPerkerasan, $totalPanjangPenanganan) < 4000 ? 250 : (max($totalPanjang, $totalPanjangPerkerasan, $totalPanjangPenanganan) < 10000 ? 500 : 1000)) ?>;
         })(),
         init() {
             this.$watch('tickInterval', value => {
@@ -272,6 +382,11 @@
             this.$watch('showPerkerasan', value => {
                 try {
                     localStorage.setItem('show_perkerasan_line', value ? '1' : '0');
+                } catch (e) {}
+            });
+            this.$watch('showPenanganan', value => {
+                try {
+                    localStorage.setItem('show_penanganan_line', value ? '1' : '0');
                 } catch (e) {}
             });
         },
@@ -315,29 +430,56 @@
     <!-- Header Controls -->
     <div class="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4">
         <div>
-            <h3 class="text-lg font-semibold text-gray-900">Visualisasi Strip Map & Perkerasan</h3>
-            <p class="text-xs text-gray-500 mt-0.5">Panjang ruas: <?= format_number(max($totalPanjang, $totalPanjangPerkerasan)) ?> m — Klik atau hover segmen untuk melihat detail data.</p>
+            <h3 class="text-lg font-semibold text-gray-900">Visualisasi Strip Map, Perkerasan & Penanganan</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Panjang ruas: <?= format_number(max($totalPanjang, $totalPanjangPerkerasan, $totalPanjangPenanganan)) ?> m — Klik atau hover segmen untuk melihat detail data.</p>
         </div>
-        <div class="flex items-center gap-4 print:hidden no-export">
+        <div class="flex flex-wrap items-center gap-3 print:hidden no-export">
             <!-- Toggle Hide/Unhide Perkerasan Line Dropdown -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5">
                 <span class="text-xs font-semibold text-gray-600 flex items-center gap-1">
                     <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
-                    Perkerasan Line:
+                    Perkerasan:
                 </span>
-                <select :value="showPerkerasan ? 'true' : 'false'" @change="showPerkerasan = ($event.target.value === 'true')" class="text-xs rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-100 focus:border-blue-500 focus:outline-none transition-colors">
+                <select :value="showPerkerasan ? 'true' : 'false'" @change="showPerkerasan = ($event.target.value === 'true')" class="text-xs rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 font-medium text-gray-700 hover:bg-gray-100 focus:border-blue-500 focus:outline-none transition-colors">
                     <option value="true">Tampilkan</option>
                     <option value="false">Sembunyikan</option>
                 </select>
             </div>
 
+            <!-- Toggle Hide/Unhide Penanganan Line Dropdown -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-xs font-semibold text-blue-700 flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    Penanganan:
+                </span>
+                <select :value="showPenanganan ? 'true' : 'false'" @change="showPenanganan = ($event.target.value === 'true')" class="text-xs rounded-lg border border-blue-200 bg-blue-50/50 px-2 py-1 font-medium text-blue-800 hover:bg-blue-100 focus:border-blue-500 focus:outline-none transition-colors">
+                    <option value="true">Tampilkan</option>
+                    <option value="false">Sembunyikan</option>
+                </select>
+            </div>
+
+            <!-- Filter Tahun Penanganan -->
+            <?php if (!empty($penanganans) || !empty($penangananYears)): ?>
+            <div class="flex items-center gap-1.5" x-show="showPenanganan">
+                <span class="text-xs font-semibold text-gray-600">Tahun:</span>
+                <select x-model="penangananYearFilter" class="text-xs rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 font-medium text-gray-700 hover:bg-gray-100 focus:border-blue-500 focus:outline-none transition-colors">
+                    <option value="all">Semua Tahun</option>
+                    <?php foreach ($penangananYears as $yr): ?>
+                        <option value="<?= $yr ?>"><?= $yr ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+
             <!-- STA Label Scale Select -->
-            <div class="flex items-center gap-2">
-                <span class="text-xs font-semibold text-gray-600">Skala Label STA:</span>
-                <select x-model.number="tickInterval" class="text-xs rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-100 focus:border-blue-500 focus:outline-none transition-colors">
+            <div class="flex items-center gap-1.5">
+                <span class="text-xs font-semibold text-gray-600">Skala STA:</span>
+                <select x-model.number="tickInterval" class="text-xs rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 font-medium text-gray-700 hover:bg-gray-100 focus:border-blue-500 focus:outline-none transition-colors">
                     <option value="100">100 m</option>
                     <option value="200">200 m</option>
                     <option value="250">250 m</option>
@@ -445,6 +587,35 @@
                 </div>
                 <?php endif; ?>
 
+                <!-- Pie Chart 4: Segmentasi Penanganan Jalan -->
+                <?php if ($totalPanjangPenanganan > 0): ?>
+                <div x-show="showPenanganan" class="flex flex-col items-center justify-center rounded-2xl p-5 border min-h-[220px]" style="background-color: rgba(249, 250, 251, 0.6); border-color: #e5e7eb;">
+                    <h4 class="text-[13px] font-semibold text-blue-700 uppercase tracking-wider mb-4">Penanganan Jalan</h4>
+                    <div class="pie-chart-container w-full max-w-[180px] aspect-square relative">
+                        <canvas id="penangananPieChart"></canvas>
+                    </div>
+                    <!-- Legend -->
+                    <div class="flex flex-wrap justify-center gap-x-3 gap-y-1.5 mt-5">
+                        <?php
+                            $pnLegendItems = [
+                                ['label' => 'Rencana', 'color' => '#0284c7', 'pct' => $pctRencana, 'val' => $totalRencana],
+                                ['label' => 'Proses',  'color' => '#6366f1', 'pct' => $pctProses,  'val' => $totalProses],
+                                ['label' => 'Selesai', 'color' => '#10b981', 'pct' => $pctSelesai, 'val' => $totalSelesai],
+                            ];
+                        ?>
+                        <?php foreach ($pnLegendItems as $li): ?>
+                            <?php if ($li['val'] > 0): ?>
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: <?= $li['color'] ?>;"></span>
+                                <span class="text-[11px] font-medium text-gray-600"><?= $li['label'] ?></span>
+                                <span class="text-[10px] text-gray-400"><?= number_format($li['pct'], 1) ?>%</span>
+                            </div>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+
             </div>
 
             <!-- Kanan: Line Chart & Stats (lg:col-span-8) -->
@@ -459,7 +630,39 @@
                         <div class="space-y-3 border border-gray-200 rounded-xl p-4 bg-gray-50/50 shadow-sm">
 
                             <!-- 1. Container Bar Kondisi Jalan (Strip Map) -->
-                            <div class="space-y-1">
+                            <div class="space-y-1 relative">
+                                <?php
+                                    $isLastChunk = ($chunkIdx === array_key_last($chunks));
+                                    $chunkFotos = array_filter($fotoLapangans ?? [], function($f) use ($chunk, $isLastChunk) {
+                                        // Untuk chunk terakhir: terima semua foto dari chunk['start'] ke atas
+                                        if ($isLastChunk) {
+                                            return $f['sta_meter'] >= $chunk['start'];
+                                        }
+                                        return $f['sta_meter'] >= $chunk['start'] && $f['sta_meter'] < $chunk['end'];
+                                    });
+                                ?>
+                                <?php if (!empty($chunkFotos)): ?>
+                                    <div class="relative w-full h-0 z-30 pointer-events-none">
+                                        <?php foreach ($chunkFotos as $f): ?>
+                                            <?php
+                                                $fPct = $chunkTotalPanjang > 0 ? (($f['sta_meter'] - $chunk['start']) / $chunkTotalPanjang) * 100 : 0;
+                                                $fPct = max(0, min(100, $fPct));
+                                            ?>
+                                            <div class="absolute -top-3.5 -translate-x-1/2 cursor-pointer pointer-events-auto group"
+                                                 style="left: <?= number_format($fPct, 2, '.', '') ?>%"
+                                                 onclick="window.openLightbox('<?= e($f['url']) ?>', 'Foto STA <?= e($f['sta_titik']) ?>')"
+                                                 title="Foto STA <?= e($f['sta_titik']) ?> (Klik untuk lihat foto)">
+                                                <div class="w-6 h-6 rounded-full bg-indigo-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-125 transition-transform">
+                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                                    </svg>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+
                                 <div class="flex h-5 rounded-lg overflow-hidden shadow-sm bg-gray-100 border border-gray-200">
                                     <?php $cumulativePct = 0; ?>
                                     <?php foreach ($chunk['stripmaps'] as $sm): ?>
@@ -600,6 +803,70 @@
                                 </div>
                             </div>
 
+                            <!-- 3. Container Bar Penanganan Jalan (Rencana, Sedang Dikerjakan, Selesai) -->
+                            <div x-show="showPenanganan" x-transition.opacity class="space-y-1 pt-1">
+                                <div class="flex h-5 rounded-lg overflow-hidden shadow-sm bg-gray-100 border border-gray-200">
+                                    <?php $cumulativePnPct = 0; ?>
+                                    <?php foreach ($chunk['penanganans'] as $pn): ?>
+                                        <?php
+                                            $pnTotal = $pn['panjang'] > 0 ? $pn['panjang'] : 1;
+                                            $pnPct   = $chunkTotalPanjang > 0 ? ($pn['panjang'] / $chunkTotalPanjang) * 100 : 0;
+                                        ?>
+                                        <div class="flex h-full flex-shrink-0" style="width: <?= number_format($pnPct, 4, '.', '') ?>%">
+                                            <?php if (!empty($pn['is_gap'])): ?>
+                                                <?php
+                                                    $subWidthGlobal = ($pn['panjang'] / $chunkTotalPanjang) * 100;
+                                                    $subMidPct = $cumulativePnPct + ($subWidthGlobal / 2);
+                                                    $cumulativePnPct += $subWidthGlobal;
+                                                    $staLabelStr = meter_to_sta($pn['sta_awal']) . ' — ' . meter_to_sta($pn['sta_akhir']);
+                                                ?>
+                                                <div class="h-full w-full flex-shrink-0 relative group transition-all duration-300 cursor-pointer bg-white"
+                                                     @mouseenter="if (window.matchMedia('(hover: hover)').matches) { activeLabel = { panjang: '<?= format_number($pn['panjang']) ?>', kondisi: 'Belum Ada Data Penanganan', sta: '<?= $staLabelStr ?>', color: '#9ca3af', subinfo: '' }; activePct = <?= round($subMidPct, 2) ?>; activeChunk = 'pn_<?= $chunkIdx ?>' }"
+                                                     @mouseleave="if (window.matchMedia('(hover: hover)').matches) { activeLabel = null; activeChunk = null }"
+                                                     @click.stop="activeLabel = (activeLabel && activeLabel.sta === '<?= $staLabelStr ?>' && activeLabel.kondisi === 'Belum Ada Data Penanganan') ? null : { panjang: '<?= format_number($pn['panjang']) ?>', kondisi: 'Belum Ada Data Penanganan', sta: '<?= $staLabelStr ?>', color: '#9ca3af', subinfo: '' }; activePct = <?= round($subMidPct, 2) ?>; activeChunk = 'pn_<?= $chunkIdx ?>'">
+                                                     <div class="absolute inset-0 ring-2 ring-gray-300 ring-inset opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                                </div>
+                                            <?php else: ?>
+                                                <?php
+                                                    $subWidthGlobal = ($pn['panjang'] / $chunkTotalPanjang) * 100;
+                                                    $subMidPct = $cumulativePnPct + ($subWidthGlobal / 2);
+                                                    $cumulativePnPct += $subWidthGlobal;
+                                                    $staLabelStr = meter_to_sta($pn['sta_awal']) . ' — ' . meter_to_sta($pn['sta_akhir']);
+                                                    $subInfoStr = 'Tahun ' . $pn['tahun'] . ' • ' . $pn['jenis_penanganan'] . ($pn['anggaran'] > 0 ? ' • Rp ' . format_number($pn['anggaran']) : '');
+                                                ?>
+                                                <div class="h-full flex-shrink-0 relative group transition-all duration-300 cursor-pointer"
+                                                     x-show="penangananYearFilter === 'all' || parseInt(penangananYearFilter) === <?= (int)$pn['tahun'] ?> || ('<?= $pn['status'] ?>' === 'selesai' && <?= (int)$pn['tahun'] ?> <= parseInt(penangananYearFilter))"
+                                                     style="width: 100%; background-color: <?= $pn['warna'] ?>;"
+                                                     @mouseenter="if (window.matchMedia('(hover: hover)').matches) { activeLabel = { panjang: '<?= format_number($pn['panjang']) ?>', kondisi: '<?= e($pn['status_label']) ?> (Tahun <?= e($pn['tahun']) ?>)', sta: '<?= $staLabelStr ?>', color: '<?= $pn['warna'] ?>', subinfo: '<?= e($subInfoStr) ?>' }; activePct = <?= round($subMidPct, 2) ?>; activeChunk = 'pn_<?= $chunkIdx ?>' }"
+                                                     @mouseleave="if (window.matchMedia('(hover: hover)').matches) { activeLabel = null; activeChunk = null }"
+                                                     @click.stop="activeLabel = (activeLabel && activeLabel.sta === '<?= $staLabelStr ?>' && activeLabel.kondisi === '<?= e($pn['status_label']) ?>') ? null : { panjang: '<?= format_number($pn['panjang']) ?>', kondisi: '<?= e($pn['status_label']) ?> (Tahun <?= e($pn['tahun']) ?>)', sta: '<?= $staLabelStr ?>', color: '<?= $pn['warna'] ?>', subinfo: '<?= e($subInfoStr) ?>' }; activePct = <?= round($subMidPct, 2) ?>; activeChunk = 'pn_<?= $chunkIdx ?>'">
+                                                     <div class="absolute inset-0 ring-2 ring-white/60 ring-inset opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+
+                                <!-- Label Keterangan Penanganan Hover -->
+                                <div class="relative w-full h-0 z-20">
+                                    <template x-if="activeLabel && activeChunk === 'pn_<?= $chunkIdx ?>'">
+                                        <div class="absolute top-1 flex flex-col items-center -translate-x-1/2 transition-all duration-150 ease-out"
+                                             :style="'left:' + activePct + '%'">
+                                            <div class="w-px h-3" :style="'background-color:' + activeLabel.color"></div>
+                                            <div class="mt-0.5 px-2.5 py-1.5 rounded-lg border shadow-md text-center whitespace-nowrap bg-white"
+                                                 :style="'border-color:' + activeLabel.color">
+                                                <p class="text-xs font-bold" :style="'color:' + activeLabel.color" x-text="activeLabel.panjang + ' m'"></p>
+                                                <p class="text-[10px] font-semibold text-gray-700" x-text="activeLabel.kondisi"></p>
+                                                <p class="text-[9px] font-mono text-gray-500" x-text="activeLabel.sta"></p>
+                                                <template x-if="activeLabel.subinfo">
+                                                    <p class="text-[9px] font-medium text-gray-600 border-t border-gray-100 pt-0.5 mt-0.5" x-text="activeLabel.subinfo"></p>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
                             <!-- Skala Penggaris STA Dinamis -->
                             <div class="relative w-full h-6 pt-1">
                                 <div class="absolute top-1 left-0 right-0 h-px bg-gray-300"></div>
@@ -614,7 +881,7 @@
                     <?php endforeach; ?>
                 </div>
 
-                <!-- Stats Grid (Sesuai Layout Dashboard: 4 Kondisi - 2 Kemantapan - 4 Perkerasan) -->
+                <!-- Stats Grid (Sesuai Layout Dashboard: 4 Kondisi - 2 Kemantapan - 4 Perkerasan - 3 Penanganan) -->
                 <div class="pt-6 border-t border-gray-100 space-y-6">
                     
                     <!-- Row 1: 4 Detail Kondisi Jalan (Baik, Sedang, Rusak Ringan, Rusak Berat) -->
@@ -782,6 +1049,75 @@
                         </div>
                     </div>
 
+                    <!-- Row 4: 4 Detail Segmentasi Penanganan Jalan -->
+                    <?php if ($totalPanjangPenanganan > 0): ?>
+                    <div x-show="showPenanganan">
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <!-- Rencana -->
+                            <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow" style="background-color: #f0f9ff; border-color: #bae6fd;">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #0284c7;"></span>
+                                        <span class="text-xs font-semibold text-sky-800">Rencana</span>
+                                    </div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-bold">
+                                        <?= number_format($pctRencana, 1) ?>%
+                                    </span>
+                                </div>
+                                <h3 class="text-xl font-bold text-sky-700"><?= format_number($totalRencana) ?> <span class="text-xs font-normal text-sky-600">m</span></h3>
+                                <p class="text-[11px] font-medium text-sky-600 mt-0.5">Usulan / Rencana</p>
+                            </div>
+
+                            <!-- Proses -->
+                            <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow" style="background-color: #eef2ff; border-color: #c7d2fe;">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #6366f1;"></span>
+                                        <span class="text-xs font-semibold text-indigo-800">Sedang Dikerjakan</span>
+                                    </div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                                        <?= number_format($pctProses, 1) ?>%
+                                    </span>
+                                </div>
+                                <h3 class="text-xl font-bold text-indigo-700"><?= format_number($totalProses) ?> <span class="text-xs font-normal text-indigo-600">m</span></h3>
+                                <p class="text-[11px] font-medium text-indigo-600 mt-0.5">Dalam Pengerjaan</p>
+                            </div>
+
+                            <!-- Selesai -->
+                            <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow" style="background-color: #ecfdf5; border-color: #a7f3d0;">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #10b981;"></span>
+                                        <span class="text-xs font-semibold text-emerald-800">Selesai</span>
+                                    </div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                        <?= number_format($pctSelesai, 1) ?>%
+                                    </span>
+                                </div>
+                                <h3 class="text-xl font-bold text-emerald-700"><?= format_number($totalSelesai) ?> <span class="text-xs font-normal text-emerald-600">m</span></h3>
+                                <p class="text-[11px] font-medium text-emerald-600 mt-0.5">Tuntas Ditangani</p>
+                            </div>
+
+                            <!-- Total Anggaran -->
+                            <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-2.5 h-2.5 rounded-full inline-block bg-blue-600"></span>
+                                        <span class="text-xs font-semibold text-blue-900">Total Anggaran</span>
+                                    </div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                                        <?= count($penanganans) ?> Paket
+                                    </span>
+                                </div>
+                                <h3 class="text-lg font-bold text-blue-900 truncate" title="Rp <?= format_number($totalAnggaran) ?>">
+                                    Rp <?= $totalAnggaran >= 1000000000 ? format_number($totalAnggaran / 1000000000, 2) . ' M' : ($totalAnggaran >= 1000000 ? format_number($totalAnggaran / 1000000, 2) . ' Jt' : format_number($totalAnggaran)) ?>
+                                </h3>
+                                <p class="text-[11px] font-medium text-blue-700 mt-0.5">Alokasi Dana Penanganan</p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
                 </div>
 
             </div>
@@ -906,6 +1242,44 @@
             }
         });
     }
+
+    // 4. Chart Penanganan Jalan
+    const ctx4 = document.getElementById('penangananPieChart')?.getContext('2d');
+    if (ctx4) {
+        const chartColors4 = ['#0284c7', '#6366f1', '#10b981'];
+        const chartLabels4 = ['Rencana', 'Proses', 'Selesai'];
+        const chartData4   = [<?= (float)$totalRencana ?>, <?= (float)$totalProses ?>, <?= (float)$totalSelesai ?>];
+
+        const filtered4 = chartLabels4.reduce((acc, label, i) => {
+            if (chartData4[i] > 0) {
+                acc.labels.push(label);
+                acc.data.push(chartData4[i]);
+                acc.colors.push(chartColors4[i]);
+            }
+            return acc;
+        }, { labels: [], data: [], colors: [] });
+
+        new Chart(ctx4, {
+            type: 'pie',
+            data: {
+                labels: filtered4.labels,
+                datasets: [{
+                    data: filtered4.data,
+                    backgroundColor: filtered4.colors,
+                    borderWidth: 2.5,
+                    borderColor: '#ffffff',
+                    hoverOffset: 12
+                }]
+            },
+            options: {
+                layout: { padding: 30 },
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', runChartInit);

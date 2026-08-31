@@ -92,7 +92,25 @@ class DashboardController
             ];
         }
 
-        $data = array_merge($stats, [
+        $penangananService   = new PenangananService();
+        $selectedTahun       = isset($_GET['tahun']) && is_numeric($_GET['tahun']) && (int)$_GET['tahun'] > 0 ? (int)$_GET['tahun'] : null;
+        $penangananSummary   = $penangananService->getGlobalSummary($selectedTahun);
+        $penangananYears     = $penangananService->getAvailableYears();
+        $penangananByKab     = $penangananService->getSummaryByKabupaten($selectedTahun);
+
+        $penangananStats = [
+            'selectedTahun'       => $selectedTahun,
+            'penangananYears'     => $penangananYears,
+            'penangananSummary'   => $penangananSummary,
+            'penangananTotalKm'   => round(((float)($penangananSummary['total_panjang'] ?? 0)) / 1000, 2),
+            'penangananRencanaKm' => round(((float)($penangananSummary['total_rencana'] ?? 0)) / 1000, 2),
+            'penangananProsesKm'  => round(((float)($penangananSummary['total_proses'] ?? 0)) / 1000, 2),
+            'penangananSelesaiKm' => round(((float)($penangananSummary['total_selesai'] ?? 0)) / 1000, 2),
+            'penangananAnggaran'  => (float)($penangananSummary['total_anggaran'] ?? 0),
+            'penangananByKab'     => $penangananByKab,
+        ];
+
+        $data = array_merge($stats, $penangananStats, [
             'title'              => 'Dashboard',
             'totalRuas'          => count($ruasList),
             'ruasList'           => $ruasList,

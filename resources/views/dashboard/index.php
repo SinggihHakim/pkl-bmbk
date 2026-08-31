@@ -8,8 +8,20 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
-            <p class="mt-1 text-sm text-gray-500">Ringkasan data ruas jalan, strip map, dan jenis perkerasan.</p>
+            <p class="mt-1 text-sm text-gray-500">Ringkasan data ruas jalan, strip map, jenis perkerasan, dan segmentasi penanganan.</p>
         </div>
+        <!-- Filter Tahun Penanganan Global -->
+        <?php if (!empty($penangananStats['all_years'])): ?>
+        <form method="GET" action="<?= base_url('dashboard') ?>" class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-gray-600">Tahun Penanganan:</span>
+            <select name="tahun" onchange="this.form.submit()" class="text-xs rounded-xl border border-gray-300 bg-white px-3 py-2 font-semibold text-gray-800 hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm transition-colors cursor-pointer">
+                <option value="all" <?= (empty($selectedTahun) || $selectedTahun === 'all') ? 'selected' : '' ?>>Semua Tahun</option>
+                <?php foreach ($penangananStats['all_years'] as $yr): ?>
+                    <option value="<?= $yr ?>" <?= ($selectedTahun == $yr) ? 'selected' : '' ?>>Tahun <?= $yr ?></option>
+                <?php endforeach; ?>
+            </select>
+        </form>
+        <?php endif; ?>
     </div>
 
     <!-- Load Chart.js CDN -->
@@ -20,7 +32,7 @@
     <!-- Stats Cards & Pie Charts Layout -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        <!-- Left Panel: Metric Cards (2 - 4 - 2 Grid Layout) -->
+        <!-- Left Panel: Metric Cards (2 - 4 - 2 - 4 - 4 Grid Layout) -->
         <div class="lg:col-span-2 space-y-4">
             
             <!-- Row 1: 2 Grid (Total Ruas & Total Panjang) -->
@@ -243,6 +255,73 @@
                 </div>
             </div>
 
+            <!-- Row 5: 4 Grid (Detail Segmentasi Penanganan Jalan: Rencana, Proses, Selesai, Total Anggaran) -->
+            <?php if (!empty($penangananStats) && $penangananStats['total_paket'] > 0): ?>
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <!-- Rencana -->
+                <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5" style="background-color: #f0f9ff; border-color: #bae6fd;">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: #0284c7; display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;"></span>
+                            <span class="text-xs font-semibold text-sky-800">Rencana</span>
+                        </div>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-bold">
+                            <?= number_format($penangananStats['pct_rencana'] ?? 0.0, 1) ?>%
+                        </span>
+                    </div>
+                    <h3 class="text-xl font-bold text-sky-700"><?= format_number($penangananStats['rencana_km'] ?? 0.0, 2) ?> <span class="text-xs font-normal text-sky-600">km</span></h3>
+                    <p class="text-[11px] font-medium text-sky-600 mt-0.5">Usulan / Rencana</p>
+                </div>
+
+                <!-- Proses -->
+                <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5" style="background-color: #eef2ff; border-color: #c7d2fe;">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: #6366f1; display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;"></span>
+                            <span class="text-xs font-semibold text-indigo-800">Sedang Dikerjakan</span>
+                        </div>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                            <?= number_format($penangananStats['pct_proses'] ?? 0.0, 1) ?>%
+                        </span>
+                    </div>
+                    <h3 class="text-xl font-bold text-indigo-700"><?= format_number($penangananStats['proses_km'] ?? 0.0, 2) ?> <span class="text-xs font-normal text-indigo-600">km</span></h3>
+                    <p class="text-[11px] font-medium text-indigo-600 mt-0.5">Dalam Pengerjaan</p>
+                </div>
+
+                <!-- Selesai -->
+                <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5" style="background-color: #ecfdf5; border-color: #a7f3d0;">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: #10b981; display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;"></span>
+                            <span class="text-xs font-semibold text-emerald-800">Selesai</span>
+                        </div>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            <?= number_format($penangananStats['pct_selesai'] ?? 0.0, 1) ?>%
+                        </span>
+                    </div>
+                    <h3 class="text-xl font-bold text-emerald-700"><?= format_number($penangananStats['selesai_km'] ?? 0.0, 2) ?> <span class="text-xs font-normal text-emerald-600">km</span></h3>
+                    <p class="text-[11px] font-medium text-emerald-600 mt-0.5">Tuntas Ditangani</p>
+                </div>
+
+                <!-- Total Anggaran -->
+                <div class="p-4 rounded-xl border shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full inline-block bg-blue-600"></span>
+                            <span class="text-xs font-semibold text-blue-900">Total Anggaran</span>
+                        </div>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                            <?= (int)($penangananStats['total_paket'] ?? 0) ?> Paket
+                        </span>
+                    </div>
+                    <h3 class="text-lg font-bold text-blue-900 truncate" title="Rp <?= format_number($penangananStats['total_anggaran'] ?? 0) ?>">
+                        Rp <?= ($penangananStats['total_anggaran'] ?? 0) >= 1000000000 ? format_number(($penangananStats['total_anggaran'] ?? 0) / 1000000000, 2) . ' M' : (($penangananStats['total_anggaran'] ?? 0) >= 1000000 ? format_number(($penangananStats['total_anggaran'] ?? 0) / 1000000, 2) . ' Jt' : format_number($penangananStats['total_anggaran'] ?? 0)) ?>
+                    </h3>
+                    <p class="text-[11px] font-medium text-blue-700 mt-0.5">Alokasi Dana Penanganan</p>
+                </div>
+            </div>
+            <?php endif; ?>
+
         </div>
 
         <!-- Right Panel: 2 Pie Charts (Takes 1 Column on LG screens) -->
@@ -308,6 +387,34 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Pie Chart 3: Proporsi Penanganan Jalan -->
+            <?php if (!empty($penangananStats) && $penangananStats['total_paket'] > 0): ?>
+            <div class="flex flex-col items-center justify-center rounded-2xl p-5 border min-h-[220px]" style="background-color: rgba(249, 250, 251, 0.6); border-color: #e5e7eb;">
+                <h4 class="text-[13px] font-semibold text-blue-700 uppercase tracking-wider mb-4">Penanganan Jalan</h4>
+                <div class="pie-chart-container w-full max-w-[180px] aspect-square relative">
+                    <canvas id="penangananGlobalPieChart"></canvas>
+                </div>
+                <!-- Legend -->
+                <div class="flex flex-wrap justify-center gap-x-3 gap-y-1.5 mt-5">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full inline-block bg-sky-600"></span>
+                        <span class="text-[11px] font-medium text-gray-600">Rencana</span>
+                        <span class="text-[10px] text-gray-400"><?= number_format($penangananStats['pct_rencana'] ?? 0.0, 1) ?>%</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full inline-block bg-indigo-600"></span>
+                        <span class="text-[11px] font-medium text-gray-600">Proses</span>
+                        <span class="text-[10px] text-gray-400"><?= number_format($penangananStats['pct_proses'] ?? 0.0, 1) ?>%</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full inline-block bg-emerald-600"></span>
+                        <span class="text-[11px] font-medium text-gray-600">Selesai</span>
+                        <span class="text-[10px] text-gray-400"><?= number_format($penangananStats['pct_selesai'] ?? 0.0, 1) ?>%</span>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
             
         </div>
         
@@ -427,12 +534,12 @@
                     </div>
                 </div>
             </div>
-            <div class="p-3.5 flex-1 flex flex-col justify-between min-h-[380px] max-h-[420px]">
+            <div class="p-3.5 flex-1 flex flex-col overflow-y-auto min-h-[380px] max-h-[420px]">
                 <div class="flex items-center gap-4 mb-2 text-[11px]">
                     <div data-dashboard-export-bar-legend-item class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background-color: #10b981;"></span><span class="font-medium text-gray-600">Mantap</span></div>
                     <div data-dashboard-export-bar-legend-item class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background-color: #ef4444;"></span><span class="font-medium text-gray-600">Tidak Mantap</span></div>
                 </div>
-                <div class="relative w-full h-[320px]">
+                <div class="relative w-full" style="height: <?= max(320, count($koridorChartData ?? []) * 24) ?>px;">
                     <canvas id="koridorBarChart"></canvas>
                 </div>
             </div>
@@ -474,12 +581,12 @@
                     </div>
                 </div>
             </div>
-            <div class="p-3.5 flex-1 flex flex-col justify-between min-h-[380px] max-h-[420px]">
+            <div class="p-3.5 flex-1 flex flex-col overflow-y-auto min-h-[380px] max-h-[420px]">
                 <div class="flex items-center gap-4 mb-2 text-[11px]">
                     <div data-dashboard-export-bar-legend-item class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background-color: #10b981;"></span><span class="font-medium text-gray-600">Mantap</span></div>
                     <div data-dashboard-export-bar-legend-item class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background-color: #ef4444;"></span><span class="font-medium text-gray-600">Tidak Mantap</span></div>
                 </div>
-                <div class="relative w-full h-[320px]">
+                <div class="relative w-full" style="height: <?= max(320, count($uptdChartData ?? []) * 24) ?>px;">
                     <canvas id="uptdBarChart"></canvas>
                 </div>
             </div>
@@ -1331,6 +1438,74 @@
                 }
             }
         });
+
+        // --------------------------------------------------------
+        // Chart 3: Proporsi Penanganan Jalan (Rencana, Proses, Selesai)
+        // --------------------------------------------------------
+        const canvas3 = document.getElementById('penangananGlobalPieChart');
+        if (canvas3) {
+            const ctx3 = canvas3.getContext('2d');
+            const chartData3 = [
+                <?= (float)($penangananStats['rencana_km'] ?? 0.0) ?>,
+                <?= (float)($penangananStats['proses_km'] ?? 0.0) ?>,
+                <?= (float)($penangananStats['selesai_km'] ?? 0.0) ?>
+            ];
+            const chartLabels3 = ['Rencana', 'Proses', 'Selesai'];
+            const chartColors3 = ['#0284c7', '#6366f1', '#10b981'];
+
+            const filtered3 = chartLabels3.reduce((acc, label, i) => {
+                if (chartData3[i] > 0) {
+                    acc.labels.push(label);
+                    acc.data.push(chartData3[i]);
+                    acc.colors.push(chartColors3[i]);
+                }
+                return acc;
+            }, { labels: [], data: [], colors: [] });
+
+            new Chart(ctx3, {
+                type: 'pie',
+                data: {
+                    labels: filtered3.labels,
+                    datasets: [{
+                        data: filtered3.data,
+                        backgroundColor: filtered3.colors,
+                        borderWidth: 2.5,
+                        borderColor: '#ffffff',
+                        hoverBorderWidth: 3,
+                        hoverBorderColor: '#ffffff',
+                        hoverOffset: 12
+                    }]
+                },
+                options: {
+                    layout: { padding: 30 },
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeOutQuart'
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(31,41,55,0.95)',
+                            titleFont: { family: 'Inter, system-ui, sans-serif', size: 12, weight: '600' },
+                            bodyFont: { family: 'Inter, system-ui, sans-serif', size: 11 },
+                            padding: { top: 10, bottom: 10, left: 14, right: 14 },
+                            cornerRadius: 10,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                    return ` ${context.label}: ${new Intl.NumberFormat('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} km (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
     });
     </script>
 

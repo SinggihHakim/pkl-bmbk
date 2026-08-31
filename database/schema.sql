@@ -124,3 +124,101 @@ CREATE TABLE IF NOT EXISTS `perkerasan` (
     KEY `idx_ruas_id` (`ruas_id`),
     CONSTRAINT `fk_perkerasan_ruas` FOREIGN KEY (`ruas_id`) REFERENCES `ruas_jalan` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Tabel: foto_lapangan
+-- Menyimpan data foto kondisi real di lapangan per STA
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `foto_lapangan` (
+    `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `ruas_id`    INT UNSIGNED NOT NULL,
+    `sta_titik`  VARCHAR(20) NOT NULL COMMENT 'Contoh: 0+100',
+    `sta_meter`  INT NOT NULL COMMENT 'Posisi meter untuk kalkulasi presisi',
+    `file_name`  VARCHAR(255) NOT NULL,
+    `file_path`  VARCHAR(255) NOT NULL,
+    `file_size`  INT DEFAULT 0,
+    `keterangan` TEXT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY `idx_ruas_id` (`ruas_id`),
+    KEY `idx_ruas_sta` (`ruas_id`, `sta_meter`),
+    CONSTRAINT `fk_foto_lapangan_ruas`
+        FOREIGN KEY (`ruas_id`)
+        REFERENCES `ruas_jalan` (`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Tabel: penanganan
+-- Menyimpan data segmentasi penanganan jalan per tahun & status
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `penanganan` (
+    `id`               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `ruas_id`          INT UNSIGNED NOT NULL,
+    `tahun`            INT NOT NULL COMMENT 'Tahun pelaksanaan/anggaran, contoh: 2026, 2027',
+    `sta_awal`         DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'STA Awal segmen penanganan (meter)',
+    `sta_akhir`        DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'STA Akhir segmen penanganan (meter)',
+    `panjang`          DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Panjang segmen penanganan (meter)',
+    `jenis_penanganan` VARCHAR(100) NOT NULL COMMENT 'Rekonstruksi, Rehabilitasi, Pemeliharaan Berkala, Pemeliharaan Rutin, dll',
+    `status`           ENUM('rencana', 'proses', 'selesai') NOT NULL DEFAULT 'rencana' COMMENT 'Status penanganan',
+    `nama_paket`       VARCHAR(255) NULL COMMENT 'Nama paket pekerjaan / tender',
+    `anggaran`         DECIMAL(15,2) NULL DEFAULT 0.00 COMMENT 'Nilai anggaran dalam Rupiah',
+    `sumber_dana`      VARCHAR(100) NULL COMMENT 'APBD, APBN, DAK, DBH, dll',
+    `warna`            VARCHAR(20) NULL COMMENT 'Warna penanda kustom (hex code) opsional',
+    `keterangan`       TEXT NULL,
+    `created_at`       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY `idx_ruas_id` (`ruas_id`),
+    KEY `idx_ruas_tahun` (`ruas_id`, `tahun`),
+    CONSTRAINT `fk_penanganan_ruas`
+        FOREIGN KEY (`ruas_id`)
+        REFERENCES `ruas_jalan` (`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Migrasi kolom prediksi kondisi jalan pada tabel penanganan
+-- (Jalankan jika tabel `penanganan` sudah ada sebelumnya)
+-- ------------------------------------------------------------
+ALTER TABLE `penanganan`
+    ADD COLUMN `jenis_pelaksana`
+        ENUM(
+            'pihak_ke3_rigid',
+            'pihak_ke3_aspal',
+            'rutin_uptd',
+            'urc_overlay_tanpa_finisher',
+            'urc_overlay_dengan_finisher',
+            'urc_rigid',
+            'urc_base'
+        ) NULL
+        COMMENT 'Pelaksana/jenis teknis penanganan sesuai matriks strip map'
+        AFTER `jenis_penanganan`,
+
+    ADD COLUMN `perkerasan_hasil`
+        ENUM(
+            'rigid',
+            'aspal',
+            'agregat_tanah',
+            'belum_tembus'
+        ) NULL
+        COMMENT 'Prediksi jenis perkerasan hasil setelah penanganan (dihitung otomatis)'
+        AFTER `jenis_pelaksana`,
+
+    ADD COLUMN `kondisi_prediksi`
+        ENUM(
+            'baik',
+            'sedang',
+            'rusak_ringan',
+            'rusak_berat'
+        ) NULL
+        COMMENT 'Prediksi kondisi jalan setelah penanganan (dihitung otomatis)'
+        AFTER `perkerasan_hasil`,
+
+    ADD COLUMN `perlu_verifikasi`
+        TINYINT(1) NOT NULL DEFAULT 0
+        COMMENT 'Flag: 1 = perlu verifikasi manual (kasus URC Base dll)'
+        AFTER `kondisi_prediksi`;
+
+
